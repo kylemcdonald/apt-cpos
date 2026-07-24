@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import {
   decodeCpos,
   inspectCpos,
 } from "./cpos.js";
+import { encodePos } from "./encoder.js";
 
 const DEFAULT_TARGET_POINTS = 4_000_000;
 
@@ -42,24 +42,9 @@ if (!command || !inputPath) {
         throw new Error(`unknown argument: ${rest[index]}`);
       }
     }
-    const python = process.env.PYTHON || "python3";
-    const completed = spawnSync(
-      python,
-      [
-        "-m",
-        "cpos.cli",
-        "encode",
-        inputPath,
-        outputPath,
-        "--target-points",
-        String(targetPoints),
-      ],
-      { cwd: new URL("..", import.meta.url), stdio: "inherit" },
-    );
-    if (completed.error) throw completed.error;
-    if (completed.status !== 0) {
-      throw new Error(`Python CPOS encoder exited with status ${completed.status}`);
-    }
+    const source = readFileSync(inputPath);
+    const payload = await encodePos(source, { targetPoints });
+    writeFileSync(outputPath, payload);
   }
 } else if (command === "decode") {
   if (!outputPath) {

@@ -48,6 +48,20 @@ print(cloud.exact)  # true only for complete rare-ion tuples
 `decode_cloud` also exposes the coarse source/seed histograms, the exact
 0.002 Da source histogram, coarse mass-bin indices, and provenance flags.
 
+## Browser
+
+[Open the browser converter](https://kylemcdonald.github.io/apt-cpos/), then
+drop a four-column `.pos` file onto the page. The current CPOS beta encoder
+runs in a Web Worker, uses the fixed 4,000,000-seed target, and enables a
+`.cpos` download when it finishes. The POS data and generated CPOS file stay
+in the browser and are never uploaded. Dropping a `.cpos` file decodes it for
+inspection.
+
+The browser implementation is in
+[`javascript/encoder.js`](javascript/encoder.js). It writes the same current
+224-byte hybrid layout as the Python encoder; it is not an earlier CPOS
+compatibility encoder.
+
 ## Rangefinder
 
 [`javascript/cpos.js`](javascript/cpos.js) is the dependency-free browser
@@ -66,7 +80,7 @@ decoders understand only the current 224-byte hybrid layout. Files made by
 earlier CPOS implementations are rejected, including earlier beta files that
 used the same numeric identifiers.
 
-The Node wrapper uses the Python reference encoder and the JavaScript decoder:
+The Node wrapper uses the same JavaScript encoder and decoder as the browser:
 
 ```bash
 node javascript/cli.mjs encode input.pos output.cpos

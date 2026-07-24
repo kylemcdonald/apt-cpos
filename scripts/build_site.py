@@ -6,7 +6,13 @@ import argparse
 import shutil
 from pathlib import Path
 
-DEMO_FILES = ("index.html", "style.css", "app.js", "renderer.js")
+DEMO_FILES = (
+    "index.html",
+    "style.css",
+    "app.js",
+    "renderer.js",
+    "encoder.worker.js",
+)
 DATA_FILES = ("example.cpos", "example.json")
 
 
@@ -29,6 +35,10 @@ def main() -> int:
     for name in DATA_FILES:
         shutil.copy2(root / "demo" / "data" / name, output / "data" / name)
     shutil.copy2(root / "javascript" / "cpos.js", output / "javascript" / "cpos.js")
+    shutil.copy2(
+        root / "javascript" / "encoder.js",
+        output / "javascript" / "encoder.js",
+    )
     (output / ".nojekyll").write_text("")
     print(output)
     return 0

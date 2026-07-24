@@ -19,6 +19,7 @@ from cpos import (
     inspect,
 )
 from cpos.codec import HEADER_SIZE, allocate_sublinear, spectrum_counts
+from cpos.io import write_pos
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -197,3 +198,30 @@ def test_javascript_decoder_restores_the_source_count(tmp_path: Path):
         check=True,
     )
     assert pos_path.stat().st_size == len(points) * 16
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node is not installed")
+def test_javascript_encoder_is_readable_by_python(tmp_path: Path):
+    points = synthetic_points(count=12_003)
+    pos_path = tmp_path / "fixture.pos"
+    cpos_path = tmp_path / "encoded.cpos"
+    write_pos(pos_path, points)
+    subprocess.run(
+        [
+            "node",
+            str(ROOT / "javascript" / "cli.mjs"),
+            "encode",
+            str(pos_path),
+            str(cpos_path),
+            "--target-points",
+            "4003",
+        ],
+        cwd=ROOT,
+        check=True,
+    )
+    header = inspect(cpos_path.read_bytes())
+    reconstructed = decode(cpos_path.read_bytes())
+    assert header.original_point_count == len(points)
+    assert header.stored_point_count == 4_003
+    assert len(reconstructed) == len(points)
+    assert np.array_equal(histogram(points, 0.1), histogram(reconstructed, 0.1))

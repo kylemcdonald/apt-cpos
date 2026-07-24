@@ -7,13 +7,16 @@ import {
 const librarySpecifier = new URL(import.meta.url).pathname.includes("/demo/")
   ? "../javascript/cpos.js"
   : "./javascript/cpos.js";
-const { decodeCpos } = await import(librarySpecifier);
+const { decodeCpos, inspectCpos } = await import(librarySpecifier);
 
+const TARGET_POINTS = 4_000_000;
 const elements = {
   body: document.body,
   dropZone: document.getElementById("drop-zone"),
   fileInput: document.getElementById("file-input"),
   chooseFile: document.getElementById("choose-file"),
+  download: document.getElementById("download"),
+  progress: document.getElementById("progress"),
   status: document.getElementById("status"),
   summary: document.getElementById("summary"),
   cposStats: document.getElementById("cpos-stats"),
@@ -26,6 +29,11 @@ const renderer = new CloudRenderer(
   document.getElementById("cpos-cloud"),
   createSharedCamera(),
 );
+
+let busy = false;
+let userHasActed = false;
+let downloadUrl = null;
+let downloadName = "converted.cpos";
 
 function formatInteger(value) {
   return new Intl.NumberFormat("en-US").format(value);
@@ -43,9 +51,62 @@ function formatBytes(value) {
   return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[unit]}`;
 }
 
-function setBusy(busy) {
-  elements.body.classList.toggle("busy", busy);
-  elements.chooseFile.disabled = busy;
+function setBusy(value) {
+  busy = value;
+  elements.body.classList.toggle("busy", value);
+  elements.chooseFile.disabled = value;
+}
+
+function setProgress(stage, fraction) {
+  elements.progress.hidden = false;
+  elements.progress.value = fraction;
+  elements.status.textContent = stage;
+}
+
+function hideProgress() {
+  elements.progress.hidden = true;
+  elements.progress.value = 0;
+}
+
+function clearDownload() {
+  if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+  downloadUrl = null;
+  elements.download.disabled = true;
+}
+
+function setDownload(payload, sourceName) {
+  clearDownload();
+  const blob = new Blob([payload], { type: "application/octet-stream" });
+  downloadUrl = URL.createObjectURL(blob);
+  downloadName = sourceName.replace(/\.pos$/i, "") + ".cpos";
+  elements.download.disabled = false;
+}
+
+function coarseCounts(payload, header, offset) {
+  const view = new DataView(payload);
+  const counts = new Uint32Array(header.spectrumBinCount);
+  for (let index = 0; index < counts.length; index += 1) {
+    counts[index] = view.getUint32(offset + index * 4, true);
+  }
+  return counts;
+}
+
+function showHeader(payload, header, { previewAvailable }) {
+  const trueCounts = coarseCounts(payload, header, header.trueCountsOffset);
+  const storedCounts = coarseCounts(payload, header, header.storedCountsOffset);
+  elements.cposStats.textContent = (
+    `${formatInteger(header.originalPointCount)} ions · `
+    + `${formatInteger(header.storedPointCount)} seeds · `
+    + `${formatInteger(header.exactPointCount)} rare tuples`
+  );
+  drawSpectrum(elements.spectrum, trueCounts, storedCounts, {
+    binWidth: header.spectrumBinDa,
+  });
+  if (!previewAvailable) {
+    renderer.clear();
+    elements.cposEmpty.hidden = false;
+    elements.cposEmpty.textContent = "conversion complete · download ready";
+  }
 }
 
 function showDecoded(decoded) {
@@ -72,28 +133,75 @@ async function loadExample() {
     }
     const metadata = await metadataResponse.json();
     const payload = await payloadResponse.arrayBuffer();
-    showDecoded(await decodeCpos(payload));
-    elements.status.textContent = `${metadata.title} CPOS beta example`;
+    const decoded = await decodeCpos(payload);
+    if (userHasActed) return;
+    showDecoded(decoded);
+    elements.status.textContent = "Drop a .pos to convert it locally.";
     elements.summary.textContent = (
-      `${formatBytes(metadata.original_size_bytes)} → `
-      + `${formatBytes(metadata.cpos_size_bytes)} · `
-      + `${metadata.compression_ratio.toFixed(1)}× smaller`
+      `Example: ${formatBytes(metadata.original_size_bytes)} → `
+      + `${formatBytes(metadata.cpos_size_bytes)}`
     );
     elements.credit.textContent = (
       `Public example: ${metadata.title} · Zenodo 7979668 · ${metadata.license}`
     );
   } catch (error) {
-    elements.status.textContent = error.message;
+    if (userHasActed) return;
+    elements.status.textContent = "Drop a .pos to convert it locally.";
     elements.cposEmpty.textContent = "example unavailable";
   }
 }
 
-async function processCpos(file) {
-  if (!file.name.toLowerCase().endsWith(".cpos")) {
-    elements.status.textContent = "Choose a CPOS beta file.";
-    return;
-  }
+async function encodePosFile(file) {
   setBusy(true);
+  clearDownload();
+  elements.summary.textContent = formatBytes(file.size);
+  setProgress(`Reading ${file.name}…`, 0);
+  const started = performance.now();
+  let worker;
+  try {
+    const buffer = await file.arrayBuffer();
+    worker = new Worker(
+      new URL("./encoder.worker.js", import.meta.url),
+      { type: "module" },
+    );
+    const payload = await new Promise((resolve, reject) => {
+      worker.onmessage = (event) => {
+        if (event.data.type === "progress") {
+          setProgress(event.data.stage, event.data.fraction);
+        } else if (event.data.type === "result") {
+          resolve(event.data.payload);
+        } else if (event.data.type === "error") {
+          reject(new Error(event.data.message));
+        }
+      };
+      worker.onerror = (event) => {
+        reject(new Error(event.message || "CPOS encoder worker failed"));
+      };
+      worker.postMessage({ buffer, targetPoints: TARGET_POINTS }, [buffer]);
+    });
+    const header = inspectCpos(payload);
+    setDownload(payload, file.name);
+    showHeader(payload, header, { previewAvailable: false });
+    const elapsed = (performance.now() - started) / 1000;
+    elements.status.textContent = `${downloadName} is ready to download`;
+    elements.summary.textContent = (
+      `${formatBytes(file.size)} → ${formatBytes(payload.byteLength)} · `
+      + `${elapsed.toFixed(1)} s`
+    );
+  } catch (error) {
+    console.error(error);
+    elements.status.textContent = error.message || "Encoding failed.";
+    elements.summary.textContent = "";
+  } finally {
+    worker?.terminate();
+    hideProgress();
+    setBusy(false);
+  }
+}
+
+async function processCpos(file) {
+  setBusy(true);
+  clearDownload();
   elements.status.textContent = `Decoding ${file.name}…`;
   elements.summary.textContent = "";
   try {
@@ -115,11 +223,33 @@ async function processCpos(file) {
   }
 }
 
+function processFile(file) {
+  if (busy) return;
+  userHasActed = true;
+  if (/\.pos$/i.test(file.name)) {
+    encodePosFile(file);
+  } else if (/\.cpos$/i.test(file.name)) {
+    processCpos(file);
+  } else {
+    elements.status.textContent = "Choose a four-column .pos or CPOS beta file.";
+  }
+}
+
 elements.chooseFile.addEventListener("click", () => elements.fileInput.click());
 elements.fileInput.addEventListener("change", () => {
   const [file] = elements.fileInput.files;
-  if (file) processCpos(file);
+  if (file) processFile(file);
   elements.fileInput.value = "";
+});
+
+elements.download.addEventListener("click", () => {
+  if (!downloadUrl) return;
+  const anchor = document.createElement("a");
+  anchor.href = downloadUrl;
+  anchor.download = downloadName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
 });
 
 for (const eventName of ["dragenter", "dragover"]) {
@@ -136,7 +266,8 @@ for (const eventName of ["dragleave", "drop"]) {
 }
 elements.dropZone.addEventListener("drop", (event) => {
   const [file] = event.dataTransfer.files;
-  if (file) processCpos(file);
+  if (file) processFile(file);
 });
 
+window.addEventListener("beforeunload", clearDownload);
 loadExample();
