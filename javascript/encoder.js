@@ -483,8 +483,10 @@ export async function encodePos(
   const storedCounts = allocateSublinear(trueCounts, storedPointCount);
   let exactPointCount = 0;
   let maximumBin = 0;
+  let activeBinCount = 0;
   for (let bin = 0; bin < trueCounts.length; bin += 1) {
     maximumBin = Math.max(maximumBin, trueCounts[bin]);
+    if (trueCounts[bin]) activeBinCount += 1;
     if (trueCounts[bin] && trueCounts[bin] === storedCounts[bin]) {
       exactPointCount += trueCounts[bin];
     }
@@ -522,6 +524,7 @@ export async function encodePos(
   let selectedCursor = 0;
   let exactCursor = 0;
   let completedSourcePoints = 0;
+  let completedBins = 0;
   for (let bin = 0; bin < trueCounts.length; bin += 1) {
     const count = trueCounts[bin];
     const take = storedCounts[bin];
@@ -561,11 +564,14 @@ export async function encodePos(
       }
     }
     completedSourcePoints += count;
-    report(
-      onProgress,
-      `selecting spatial seeds · ${Math.round(100 * completedSourcePoints / pointCount)}%`,
-      0.22 + 0.34 * completedSourcePoints / pointCount,
-    );
+    completedBins += 1;
+    if ((completedBins & 31) === 0 || completedBins === activeBinCount) {
+      report(
+        onProgress,
+        `selecting spatial seeds · ${Math.round(100 * completedSourcePoints / pointCount)}%`,
+        0.22 + 0.34 * completedSourcePoints / pointCount,
+      );
+    }
   }
   if (
     selectedCursor !== storedPointCount

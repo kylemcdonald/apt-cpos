@@ -67,13 +67,6 @@ code, select, button { font: inherit; }
   background: rgba(57, 135, 229, 0.12);
 }
 
-.drop-zone label {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-left: auto;
-}
-
 .target-note {
   margin-left: auto;
   font-size: 12px;
@@ -214,7 +207,6 @@ body.busy select { pointer-events: none; }
 @media (max-width: 850px) {
   .panels { grid-template-columns: 1fr; }
   canvas[id$="-cloud"] { height: 52vh; min-height: 340px; }
-  .drop-zone label { margin-left: 0; }
   .target-note { width: 100%; margin-left: 0; }
   .hint { width: 100%; margin-left: 0; }
   footer { align-items: flex-start; flex-direction: column; }
