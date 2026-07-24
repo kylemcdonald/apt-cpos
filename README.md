@@ -1,85 +1,102 @@
 # cpos
 
-`cpos` is a lossy APT `.POS` codec for quick web-based previews. It keeps a
-proportional mass-stratified sample of an atom cloud, quantizes each retained
-`x`, `y`, `z`, and mass value to 16 bits, and stores the result in one
-versioned `.cpos` file.
+`cpos` is a fixed-budget lossy codec for four-column Atom Probe `.POS` files.
+It is designed to preserve the full ion count, rare-ion detail, mass-spectrum
+shape, and point-cloud appearance in a roughly 10 MB browser-friendly file.
 
-[Open the browser encoder and visualization](https://kylemcdonald.github.io/apt-cpos/)
+The CPOS beta uses a hybrid representation:
 
-CPOS is deliberately a preview format. Decoding returns the retained preview
-points, not a synthetic cloud with the original ion count.
+- quantize positions to 12 bits;
+- retain at most 4,000,000 spatial seeds using the mass-aware sublinear
+  allocator developed on `research/lossy-4m`;
+- retain every ion in rare 0.1 Da bins, including a 12-bit mass residual local
+  to that bin;
+- represent common-bin masses with the exact source histogram at 0.002 Da;
+- Morton-sort and Rice-code spatial gaps, bitplane-code exact masses, and
+  Deflate the combined core;
+- deterministically synthesize only common-bin ions until the original ion
+  count is restored.
+
+The 0.1 Da-local mass quantizer has a step of about 0.000024 Da. This replaces
+the lossy-4m experiment's whole-file 12-bit mass quantizer, whose approximately
+0.043 Da steps on the Ga test file destroyed fine spectrum structure.
 
 ## Python
 
 ```bash
 python3 -m pip install -e .
-cpos encode input.pos preview.cpos --max-points 499000
-cpos inspect preview.cpos
-cpos decode preview.cpos reconstructed.pos
+cpos encode input.pos output.cpos
+cpos inspect output.cpos
+cpos decode output.cpos reconstructed.pos
 ```
 
-The Python API accepts an `N × 4` `float32` array containing `x`, `y`, `z`
-(nanometers), and mass-to-charge ratio (Da):
+The default target is 4,000,000 retained spatial seeds. `--target-points` can
+override it.
 
 ```python
-from cpos import decode, encode
+from cpos import decode, decode_cloud, encode
 
-payload = encode(points, max_points=499_000)
-preview_points = decode(payload)
+payload = encode(points)
+reconstructed = decode(payload)
+assert len(reconstructed) == len(points)
+
+cloud = decode_cloud(payload)
+print(cloud.header.exact_point_count)
+print(cloud.exact)  # true only for complete rare-ion tuples
 ```
 
-## JavaScript
+`decode_cloud` also exposes the coarse source/seed histograms, the exact
+0.002 Da source histogram, coarse mass-bin indices, and provenance flags.
 
-The dependency-free ES module is in [`javascript/cpos.js`](javascript/cpos.js).
-It works in browsers and Node:
+## Rangefinder
 
-```js
-import { decodeCpos, encodePos } from "./javascript/cpos.js";
+[`javascript/cpos.js`](javascript/cpos.js) is the dependency-free browser
+decoder. Rangefinder vendors the same decoder. Dropped CPOS beta files expand
+to the source ion count before analysis and rendering. Rangefinder uses the
+stored 0.002 Da source spectrum for its quick RRNG path.
 
-const payload = encodePos(posArrayBuffer, { maxPoints: 499_000 });
-const { header, points } = decodeCpos(payload);
+## Beta compatibility
+
+The project and file identifiers remain at package `1.0.0`, container `1.0`,
+and codec `1.0.0` throughout this beta. They will not be bumped until the
+format is approved.
+
+There is deliberately no backward-compatibility path. The encoder and both
+decoders understand only the current 224-byte hybrid layout. Files made by
+earlier CPOS implementations are rejected, including earlier beta files that
+used the same numeric identifiers.
+
+The Node wrapper uses the Python reference encoder and the JavaScript decoder:
+
+```bash
+node javascript/cli.mjs encode input.pos output.cpos
+node javascript/cli.mjs decode output.cpos reconstructed.pos
 ```
 
-Python tests invoke Node and require byte-for-byte parity between both
-encoders, then compare their decoded `.POS` output:
+## Acceptance data
+
+For `86a2fa56-8593-4856-bd42-b73716197abf.POS`:
+
+- source and decoded count: 8,657,555 ions;
+- CPOS size: 10,257,324 bytes (9.78 MiB);
+- retained spatial seeds: 4,000,000;
+- complete rare-ion tuples: 895,899;
+- 68.5–69.3 Da source and decoded count: 33,637;
+- 0.01 Da Ga-window histogram correlation: 0.9999993;
+- 32³ spatial Jensen–Shannon divergence: 0.00001259 bits.
+
+A 29,810,068-ion input encodes to 9,392,088 bytes and decodes to all
+29,810,068 ions. A deliberately difficult dense-background 20,949,148-ion
+input encodes to 12,318,515 bytes.
+
+## Tests
 
 ```bash
 python3 -m pytest
 ```
 
-## Versioned format
+The tests cover allocation, exact rare-bin tuples, common-bin spectrum
+restoration, original-count expansion, no-decimation behavior, checksums, and
+strict current-schema rejection.
 
-Every file begins with a fixed 128-byte `CPOS` header containing separate
-container and codec versions. CPOS currently writes container `1.0` and codec
-`1.0.0`. Readers accept exactly this version and verify the payload
-CRC32 before decoding. See [FORMAT.md](FORMAT.md) for the binary layout and
-compatibility policy.
-
-## Public example
-
-The Pages example is generated with 499,000 retained points from Peter
-Felfer's public Ck10 steel control:
-
-- Zenodo record [7979668](https://zenodo.org/records/7979668), CC-BY-4.0
-- source archive `ger_erlangen_felfer_ck10.zip`
-- source member `R56_01769-v01.pos`
-
-The raw 88.4 MB `.pos` file is ignored and never committed. Download and build
-the compact derived example with:
-
-```bash
-python3 scripts/download_example.py
-python3 scripts/build_demo.py
-python3 scripts/build_site.py
-```
-
-You can also pass an existing copy directly:
-
-```bash
-python3 scripts/build_demo.py --pos /path/to/R56_01769-v01.pos
-```
-
-Earlier compression experiments remain isolated on the
-[`archive/all-codecs`](https://github.com/kylemcdonald/apt-cpos/tree/archive/all-codecs)
-branch.
+See [FORMAT.md](FORMAT.md) for the binary layout and beta policy.

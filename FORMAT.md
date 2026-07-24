@@ -1,60 +1,117 @@
-# CPOS binary format
+# CPOS beta binary format
 
-CPOS is a little-endian, single-file preview format for four-column APT
-`.POS` data. Version 1 uses mass-stratified sampling and unsigned 16-bit
-quantization.
+CPOS beta is a little-endian, fixed-budget hybrid format for four-column APT
+`.POS` data.
 
-## Versioning policy
+## Beta policy
 
-- The container version describes the byte layout.
-- The codec semantic version describes the sampling and quantization rules.
-- The reference reader accepts exactly the current container and codec
-  versions. It has no legacy decoding paths.
+The numeric identifiers are frozen at container `1.0` and codec `1.0.0` until
+the format is approved. During the beta they do not promise compatibility.
+Readers accept only the exact layout documented here. They do not contain
+migration, fallback, or earlier-layout decoding paths, so all CPOS files made
+by earlier implementations are rejected even if they carry the same numeric
+identifiers.
 
-The reference encoders and readers use container `1.0` and codec `1.0.0`.
+## File layout
+
+```text
+224-byte header
+source coarse histogram       3,000 × uint32
+retained-seed histogram       3,000 × uint32
+Deflate-compressed hybrid core
+```
+
+The CRC32 covers every byte after the header.
 
 ## Header
 
-The header is 128 bytes. All unused bytes must be zero.
+| Offset | Size | Type | Meaning |
+| ---: | ---: | --- | --- |
+| 0 | 4 | bytes | magic `CPOS` |
+| 4 | 4 | 2 × uint16 | frozen container identifier (`1`, `0`) |
+| 8 | 6 | 3 × uint16 | frozen codec identifier (`1`, `0`, `0`) |
+| 14 | 2 | uint16 | header size (`224`) |
+| 16 | 4 | uint32 | flags (`3`) |
+| 20 | 8 | uint64 | original ion count |
+| 28 | 8 | uint64 | retained spatial-seed count |
+| 36 | 8 | uint64 | requested target seed count |
+| 44 | 8 | uint64 | complete rare-ion tuple count |
+| 52 | 4 | uint32 | coarse spectrum bins (`3,000`) |
+| 56 | 4 | uint32 | fine spectrum bins (`150,000`) |
+| 60 | 20 | 5 × float32 | spectrum min/max, coarse/fine widths, allocation exponent |
+| 80 | 4 | uint32 | default dither mode |
+| 84 | 8 | uint64 | deterministic synthesis seed |
+| 92 | 24 | 6 × float32 | spatial minima, then spatial maxima |
+| 116 | 1 | uint8 | core method (`2`) |
+| 117 | 3 | 3 × uint8 | spatial axis order (`0`, `1`, `2`) |
+| 120 | 48 | 6 × uint64 | source-count offset, seed-count offset, core offset, compressed core size, uncompressed core size, file size |
+| 168 | 4 | uint32 | payload CRC32 |
+| 172 | 4 | uint32 | reserved, zero |
+| 176 | 48 | bytes | reserved, zero |
 
-| Offset | Type | Field |
-|---:|---|---|
-| 0 | `char[4]` | magic: `CPOS` |
-| 4 | `uint16` | container major |
-| 6 | `uint16` | container minor |
-| 8 | `uint16` | codec major |
-| 10 | `uint16` | codec minor |
-| 12 | `uint16` | codec patch |
-| 14 | `uint16` | header size: 128 |
-| 16 | `uint32` | endian marker: `0x01020304` |
-| 20 | `uint32` | flags |
-| 24 | `uint32` | original point count |
-| 28 | `uint32` | retained point count |
-| 32 | `uint32` | spectrum bin count |
-| 36 | `float32` | spectrum minimum mass |
-| 40 | `float32` | spectrum bin width |
-| 44 | `float32` | spectrum maximum mass |
-| 48 | `float32[3]` | minimum `x`, `y`, `z` |
-| 60 | `float32[3]` | maximum `x`, `y`, `z` |
-| 72 | `uint32` | original spectrum-count offset |
-| 76 | `uint32` | retained spectrum-count offset |
-| 80 | `uint32` | point-record offset |
-| 84 | `uint32` | total file size |
-| 88 | `uint32` | CRC32 of bytes after the header |
-| 92 | `uint32` | requested maximum point count |
-| 96 | 32 bytes | reserved, zero |
+Decoders derive canonical spectrum widths from the range and bin counts. The
+stored float32 widths are validation metadata.
 
-Flag bit 0 identifies the v1 stratified unsigned-16 representation.
+## Allocation and rare bins
 
-The two spectrum tables contain one `uint32` per bin. They retain the original
-and sampled bin occupancies. Point records are grouped by ascending spectrum
-bin and contain four little-endian `uint16` values: quantized `x`, `y`, `z`,
-and mass.
+The coarse histogram covers `[0, 300)` Da in 0.1 Da bins. Out-of-range values
+are clamped into the first or final bin.
 
-Codec 1.0 allocates retained points proportionally across the original mass
-spectrum using largest-remainder apportionment. Within each bin, deterministic
-midpoint samples are retained.
+If coarse bin `i` contains `c_i` ions, its seed quota is proportional to
+`c_i ^ 0.75`, capped at `c_i`, with one seed reserved for every active bin.
+Deterministic largest remainders make the quotas sum to the target.
 
-Version 1 uses 0–300 Da in 0.05 Da bins. Values outside this range are clipped
-for preview storage. Spatial values are linearly quantized between the six
-bounds in the header.
+A bin is rare/exact when its quota equals its source count. Every ion in that
+bin retains its 12-bit spatial tuple and a 12-bit mass residual within the
+0.1 Da bin. A bin is common/distributed when its quota is smaller than its
+source count. Common bins retain spatial seeds but reconstruct masses from the
+fine spectrum.
+
+## Hybrid core
+
+After Deflate decompression:
+
+```text
+"H12D"                              4 bytes
+retained spatial-seed count         uint64
+complete rare-ion tuple count       uint64
+fine spectrum-bin count             uint32
+active coarse-bin count             uint32
+fine source histogram               fine_count × uint32
+Rice remainder widths               active_count × uint8
+Rice unary bit lengths              active_count × uint64
+spatial remainder bitplanes         variable
+spatial unary streams               variable
+rare-bin mass-residual bitplanes    ceil(exact_count / 8) × 12
+```
+
+Spatial values are globally quantized to unsigned 12-bit values. Within every
+coarse mass bin, points are sorted by their 36-bit 3D Morton key. Evenly
+spaced ranks are selected according to the bin quota. Sorted Morton gaps use
+the per-bin Rice width that minimizes the stream; remainders and rare-bin
+masses are stored as aligned bitplanes.
+
+The fine histogram covers `[0, 300)` Da at 0.002 Da. It stores the complete
+source distribution and therefore has a total equal to the original ion
+count.
+
+## Expansion
+
+Rare bins decode directly from their retained 12-bit tuples.
+
+For each common bin:
+
+1. emit retained 12-bit spatial seeds;
+2. distribute synthesized positions evenly over those seeds;
+3. add deterministic sub-cell spatial dither;
+4. generate exactly the stored number of masses from every 0.002 Da fine bin;
+5. use a deterministic coprime permutation to avoid correlating sorted mass
+   ranks with Morton-sorted positions.
+
+The result has exactly the source ion count and exact 0.1 Da counts. Common
+bins also reproduce the exact stored 0.002 Da count distribution. Rare-bin
+mass values can differ at a small number of 0.002 Da boundaries because their
+stored representation is the finer 12-bit local residual rather than the
+histogram bin center.
+
+CPOS does not recover acquisition order or discarded sub-seed spatial detail.

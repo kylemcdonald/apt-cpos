@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cpos import decode, encode, inspect
-from cpos.codec import DEFAULT_MAX_POINTS
+from cpos.codec import DEFAULT_TARGET_POINTS
 from cpos.io import read_pos
 from download_example import OUTPUT_NAME, download
 
@@ -36,13 +36,15 @@ def main() -> int:
     )
     parser.add_argument("--output", type=Path, default=Path("demo/data"))
     parser.add_argument(
-        "--max-points", type=int, default=DEFAULT_MAX_POINTS
+        "--target-points",
+        type=int,
+        default=DEFAULT_TARGET_POINTS,
     )
     args = parser.parse_args()
 
     source = args.pos.resolve() if args.pos else download(args.download_to)
     points = read_pos(source)
-    payload = encode(points, max_points=args.max_points)
+    payload = encode(points, target_points=args.target_points)
     header = inspect(payload)
     decoded = decode(payload)
 
@@ -61,7 +63,9 @@ def main() -> int:
         "original_size_bytes": source.stat().st_size,
         "cpos_size_bytes": len(payload),
         "original_point_count": len(points),
-        "stored_point_count": len(decoded),
+        "stored_point_count": header.stored_point_count,
+        "exact_point_count": header.exact_point_count,
+        "decoded_point_count": len(decoded),
         "compression_ratio": round(source.stat().st_size / len(payload), 3),
         "container_version": ".".join(map(str, header.container_version)),
         "algorithm_version": ".".join(map(str, header.algorithm_version)),

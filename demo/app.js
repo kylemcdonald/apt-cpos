@@ -7,42 +7,25 @@ import {
 const librarySpecifier = new URL(import.meta.url).pathname.includes("/demo/")
   ? "../javascript/cpos.js"
   : "./javascript/cpos.js";
-const {
-  decodeCpos,
-  encodePos,
-  samplePosBySpectrum,
-} = await import(librarySpecifier);
+const { decodeCpos } = await import(librarySpecifier);
 
 const elements = {
   body: document.body,
   dropZone: document.getElementById("drop-zone"),
   fileInput: document.getElementById("file-input"),
   chooseFile: document.getElementById("choose-file"),
-  maxPoints: document.getElementById("max-points"),
-  download: document.getElementById("download"),
   status: document.getElementById("status"),
   summary: document.getElementById("summary"),
-  sourceStats: document.getElementById("source-stats"),
   cposStats: document.getElementById("cpos-stats"),
-  sourceEmpty: document.getElementById("source-empty"),
   cposEmpty: document.getElementById("cpos-empty"),
   spectrum: document.getElementById("spectrum"),
   credit: document.getElementById("example-credit"),
 };
 
-const camera = createSharedCamera();
-const sourceRenderer = new CloudRenderer(
-  document.getElementById("source-cloud"),
-  camera,
-);
-const cposRenderer = new CloudRenderer(
+const renderer = new CloudRenderer(
   document.getElementById("cpos-cloud"),
-  camera,
+  createSharedCamera(),
 );
-
-let currentPayload = null;
-let downloadName = "preview.cpos";
-let lastSpectrum = null;
 
 function formatInteger(value) {
   return new Intl.NumberFormat("en-US").format(value);
@@ -63,22 +46,16 @@ function formatBytes(value) {
 function setBusy(busy) {
   elements.body.classList.toggle("busy", busy);
   elements.chooseFile.disabled = busy;
-  elements.maxPoints.disabled = busy;
-  elements.download.disabled = busy || !currentPayload;
-}
-
-function nextPaint() {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
 function showDecoded(decoded) {
-  cposRenderer.setPoints(decoded.points);
+  renderer.setPoints(decoded.points);
   elements.cposEmpty.hidden = true;
   elements.cposStats.textContent = (
-    `${formatInteger(decoded.header.storedPointCount)} points · `
-    + `v${decoded.header.algorithmVersion.join(".")}`
+    `${formatInteger(decoded.header.originalPointCount)} ions · `
+    + `${formatInteger(decoded.header.storedPointCount)} seeds · `
+    + `${formatInteger(decoded.header.exactPointCount)} rare tuples`
   );
-  lastSpectrum = decoded;
   drawSpectrum(elements.spectrum, decoded.trueCounts, decoded.storedCounts, {
     binWidth: decoded.header.spectrumBinDa,
   });
@@ -95,9 +72,8 @@ async function loadExample() {
     }
     const metadata = await metadataResponse.json();
     const payload = await payloadResponse.arrayBuffer();
-    const decoded = decodeCpos(payload);
-    showDecoded(decoded);
-    elements.status.textContent = `${metadata.title} public example`;
+    showDecoded(await decodeCpos(payload));
+    elements.status.textContent = `${metadata.title} CPOS beta example`;
     elements.summary.textContent = (
       `${formatBytes(metadata.original_size_bytes)} → `
       + `${formatBytes(metadata.cpos_size_bytes)} · `
@@ -112,50 +88,28 @@ async function loadExample() {
   }
 }
 
-async function processPos(file) {
-  if (!file.name.toLowerCase().endsWith(".pos")) {
-    elements.status.textContent = "Choose a four-column .pos file.";
+async function processCpos(file) {
+  if (!file.name.toLowerCase().endsWith(".cpos")) {
+    elements.status.textContent = "Choose a CPOS beta file.";
     return;
   }
   setBusy(true);
-  elements.status.textContent = `Reading ${file.name}…`;
+  elements.status.textContent = `Decoding ${file.name}…`;
   elements.summary.textContent = "";
-  await nextPaint();
-
   try {
-    const sourceBuffer = await file.arrayBuffer();
-    const maxPoints = Number(elements.maxPoints.value);
-    elements.status.textContent = (
-      `Encoding ${formatInteger(sourceBuffer.byteLength / 16)} points in this browser…`
-    );
-    await nextPaint();
+    const payload = await file.arrayBuffer();
     const started = performance.now();
-    const payload = encodePos(sourceBuffer, { maxPoints });
-    const decoded = decodeCpos(payload);
-    const sourcePoints = samplePosBySpectrum(
-      sourceBuffer,
-      decoded.trueCounts,
-      decoded.storedCounts,
-    );
-    const elapsed = (performance.now() - started) / 1000;
-
-    sourceRenderer.setPoints(sourcePoints);
-    elements.sourceEmpty.hidden = true;
-    elements.sourceStats.textContent = (
-      `${formatInteger(sourceBuffer.byteLength / 16)} points · `
-      + `${formatBytes(sourceBuffer.byteLength)}`
-    );
+    const decoded = await decodeCpos(payload);
     showDecoded(decoded);
-    currentPayload = payload;
-    downloadName = file.name.replace(/\.pos$/i, "") + ".cpos";
-    elements.status.textContent = `${file.name} encoded in ${elapsed.toFixed(2)} s`;
+    const elapsed = (performance.now() - started) / 1000;
+    elements.status.textContent = `${file.name} decoded in ${elapsed.toFixed(2)} s`;
     elements.summary.textContent = (
-      `${formatBytes(sourceBuffer.byteLength)} → ${formatBytes(payload.byteLength)} · `
-      + `${(sourceBuffer.byteLength / payload.byteLength).toFixed(1)}× smaller`
+      `${formatBytes(payload.byteLength)} · `
+      + `${formatInteger(decoded.header.originalPointCount)} ions`
     );
   } catch (error) {
     console.error(error);
-    elements.status.textContent = error.message || "Encoding failed.";
+    elements.status.textContent = error.message || "Decoding failed.";
   } finally {
     setBusy(false);
   }
@@ -164,19 +118,8 @@ async function processPos(file) {
 elements.chooseFile.addEventListener("click", () => elements.fileInput.click());
 elements.fileInput.addEventListener("change", () => {
   const [file] = elements.fileInput.files;
-  if (file) processPos(file);
+  if (file) processCpos(file);
   elements.fileInput.value = "";
-});
-elements.download.addEventListener("click", () => {
-  if (!currentPayload) return;
-  const url = URL.createObjectURL(
-    new Blob([currentPayload], { type: "application/octet-stream" }),
-  );
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = downloadName;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
 for (const eventName of ["dragenter", "dragover"]) {
@@ -193,18 +136,7 @@ for (const eventName of ["dragleave", "drop"]) {
 }
 elements.dropZone.addEventListener("drop", (event) => {
   const [file] = event.dataTransfer.files;
-  if (file) processPos(file);
-});
-
-window.addEventListener("resize", () => {
-  if (lastSpectrum) {
-    drawSpectrum(
-      elements.spectrum,
-      lastSpectrum.trueCounts,
-      lastSpectrum.storedCounts,
-      { binWidth: lastSpectrum.header.spectrumBinDa },
-    );
-  }
+  if (file) processCpos(file);
 });
 
 loadExample();

@@ -6,14 +6,17 @@ import argparse
 import json
 from pathlib import Path
 
-from .codec import DEFAULT_MAX_POINTS, decode, encode, inspect
+from .codec import DEFAULT_TARGET_POINTS, decode, encode, inspect
 from .io import read_pos, write_pos
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="cpos",
-        description="Lossy APT .POS codec for quick web-based previews",
+        description=(
+            "Hybrid lossy APT codec with exact rare ions and distributed "
+            "common ions"
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -21,12 +24,21 @@ def main() -> int:
     encode_parser.add_argument("input", type=Path)
     encode_parser.add_argument("output", type=Path)
     encode_parser.add_argument(
-        "--max-points", type=int, default=DEFAULT_MAX_POINTS
+        "--target-points",
+        type=int,
+        default=DEFAULT_TARGET_POINTS,
+        help="maximum retained 12-bit spatial seeds (default: 4,000,000)",
     )
 
     decode_parser = subparsers.add_parser("decode", help="decode CPOS as POS")
     decode_parser.add_argument("input", type=Path)
     decode_parser.add_argument("output", type=Path)
+    decode_parser.add_argument(
+        "--noise",
+        choices=("none", "uniform", "gaussian"),
+        default="uniform",
+        help="sub-cell dither for synthesized positions",
+    )
 
     inspect_parser = subparsers.add_parser(
         "inspect", help="print versioned CPOS metadata"
@@ -37,11 +49,14 @@ def main() -> int:
     if args.command == "encode":
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_bytes(
-            encode(read_pos(args.input), max_points=args.max_points)
+            encode(read_pos(args.input), target_points=args.target_points)
         )
         return 0
     if args.command == "decode":
-        write_pos(args.output, decode(args.input.read_bytes()))
+        write_pos(
+            args.output,
+            decode(args.input.read_bytes(), noise=args.noise),
+        )
         return 0
 
     print(json.dumps(inspect(args.input.read_bytes()).to_dict(), indent=2))

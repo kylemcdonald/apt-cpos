@@ -6,13 +6,15 @@
   "zenodo_record": "https://zenodo.org/records/7979668",
   "license": "CC-BY-4.0",
   "creator": "Peter Felfer / Martina Heller",
-  "generated_at": "2026-07-23T10:14:35.161734+00:00",
+  "generated_at": "2026-07-24T19:31:08.329841+00:00",
   "original_size_bytes": 88405776,
-  "cpos_size_bytes": 4040128,
+  "cpos_size_bytes": 10546939,
   "original_point_count": 5525361,
-  "stored_point_count": 499000,
-  "compression_ratio": 21.882,
+  "stored_point_count": 4000000,
+  "exact_point_count": 1288264,
+  "decoded_point_count": 5525361,
+  "compression_ratio": 8.382,
   "container_version": "1.0",
   "algorithm_version": "1.0.0",
-  "sha256": "b430cc49aac41d9602a879e72fa740cec7aeb3317154a6526d98ae21ddba25d7"
+  "sha256": "20ff2cab447bd9bf6adea484c76f8f4b727342e936fd4692c7dbc8860519ed1a"
 }

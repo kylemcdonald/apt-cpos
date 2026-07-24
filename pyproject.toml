@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "apt-cpos"
 version = "1.0.0"
-description = "A lossy APT .POS codec for quick web-based previews"
+description = "A hybrid rare-ion/exact and common-ion/distribution APT codec"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

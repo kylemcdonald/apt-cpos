@@ -1,4 +1,4 @@
-"""Public API for the CPOS preview codec."""
+"""Public API for the CPOS hybrid codec."""
 
 from .codec import (
     ALGORITHM_VERSION,
@@ -6,6 +6,8 @@ from .codec import (
     CposHeader,
     CposVersionError,
     decode,
+    decode_cloud,
+    decode_retained,
     encode,
     inspect,
 )
@@ -16,6 +18,8 @@ __all__ = [
     "CposHeader",
     "CposVersionError",
     "decode",
+    "decode_cloud",
+    "decode_retained",
     "encode",
     "inspect",
 ]
