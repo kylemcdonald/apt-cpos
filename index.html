@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Inspect CPOS beta APT point clouds in your browser.">
+  <meta name="description" content="Convert APT POS files to CPOS beta entirely in your browser.">
   <title>cpos · APT preview codec</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -17,20 +17,23 @@
   </header>
 
   <section class="drop-zone" id="drop-zone">
-    <input id="file-input" type="file" accept=".cpos,.CPOS" hidden>
-    <button class="primary" id="choose-file" type="button">Choose .cpos</button>
-    <span>or drop a file here</span>
+    <input id="file-input" type="file" accept=".pos,.POS,.cpos,.CPOS" hidden>
+    <button class="primary" id="choose-file" type="button">Choose .pos or .cpos</button>
+    <span>or drop one here</span>
+    <span class="target-note">POS conversion uses the fixed 4M-seed target</span>
+    <button id="download" type="button" disabled>Download .cpos</button>
   </section>
 
   <div class="status-row">
-    <span id="status" role="status">Loading the public Ck10 steel example…</span>
+    <span id="status" role="status">Drop a .pos to convert it locally.</span>
     <span id="summary"></span>
   </div>
+  <progress id="progress" max="1" value="0" hidden></progress>
 
   <main class="panels">
     <article class="panel">
       <div class="panel-head">
-        <strong>decoded CPOS beta</strong>
+        <strong>CPOS beta preview</strong>
         <span id="cpos-stats">—</span>
       </div>
       <div class="canvas-wrap">
@@ -52,7 +55,7 @@
 
   <footer>
     <span id="example-credit">Public example: Ck10 steel · Zenodo 7979668 · CC-BY-4.0</span>
-    <span>CPOS beta · processing stays local</span>
+    <span>CPOS beta · encoding, decoding, and files stay local</span>
   </footer>
 
   <script type="module" src="app.js"></script>
