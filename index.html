@@ -38,7 +38,7 @@
       </div>
       <div class="canvas-wrap">
         <canvas id="cpos-cloud" aria-label="Decoded CPOS point cloud"></canvas>
-        <span class="empty-label" id="cpos-empty">loading example</span>
+        <span class="empty-label" id="cpos-empty">drop a .cpos to preview</span>
       </div>
     </article>
   </main>
@@ -54,10 +54,10 @@
   </section>
 
   <footer>
-    <span id="example-credit">Public example: Ck10 steel · Zenodo 7979668 · CC-BY-4.0</span>
+    <span>four-column APT .pos → fixed-budget .cpos</span>
     <span>CPOS beta · encoding, decoding, and files stay local</span>
   </footer>
 
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?stall-fix=1"></script>
 </body>
 </html>
