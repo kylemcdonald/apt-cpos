@@ -22,7 +22,6 @@ const elements = {
   cposStats: document.getElementById("cpos-stats"),
   cposEmpty: document.getElementById("cpos-empty"),
   spectrum: document.getElementById("spectrum"),
-  credit: document.getElementById("example-credit"),
 };
 
 const renderer = new CloudRenderer(
@@ -31,7 +30,6 @@ const renderer = new CloudRenderer(
 );
 
 let busy = false;
-let userHasActed = false;
 let downloadUrl = null;
 let downloadName = "converted.cpos";
 
@@ -122,62 +120,65 @@ function showDecoded(decoded) {
   });
 }
 
-async function loadExample() {
-  try {
-    const [metadataResponse, payloadResponse] = await Promise.all([
-      fetch("data/example.json"),
-      fetch("data/example.cpos"),
-    ]);
-    if (!metadataResponse.ok || !payloadResponse.ok) {
-      throw new Error("public example is unavailable");
-    }
-    const metadata = await metadataResponse.json();
-    const payload = await payloadResponse.arrayBuffer();
-    const decoded = await decodeCpos(payload);
-    if (userHasActed) return;
-    showDecoded(decoded);
-    elements.status.textContent = "Drop a .pos to convert it locally.";
-    elements.summary.textContent = (
-      `Example: ${formatBytes(metadata.original_size_bytes)} → `
-      + `${formatBytes(metadata.cpos_size_bytes)}`
-    );
-    elements.credit.textContent = (
-      `Public example: ${metadata.title} · Zenodo 7979668 · ${metadata.license}`
-    );
-  } catch (error) {
-    if (userHasActed) return;
-    elements.status.textContent = "Drop a .pos to convert it locally.";
-    elements.cposEmpty.textContent = "example unavailable";
-  }
-}
-
 async function encodePosFile(file) {
   setBusy(true);
   clearDownload();
   elements.summary.textContent = formatBytes(file.size);
-  setProgress(`Reading ${file.name}…`, 0);
+  setProgress(`Starting encoder for ${file.name}…`, 0);
   const started = performance.now();
   let worker;
   try {
-    const buffer = await file.arrayBuffer();
     worker = new Worker(
-      new URL("./encoder.worker.js", import.meta.url),
+      new URL("./encoder.worker.js?stall-fix=1", import.meta.url),
       { type: "module" },
     );
     const payload = await new Promise((resolve, reject) => {
+      let startedWorker = false;
+      let settled = false;
+      let lastActivity = performance.now();
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        clearInterval(watchdog);
+        callback(value);
+      };
+      const watchdog = setInterval(() => {
+        if (performance.now() - lastActivity > 60_000) {
+          finish(
+            reject,
+            new Error(
+              "The encoder stopped responding. Reload the page and try again.",
+            ),
+          );
+        }
+      }, 5_000);
       worker.onmessage = (event) => {
-        if (event.data.type === "progress") {
+        lastActivity = performance.now();
+        if (event.data.type === "ready") {
+          if (startedWorker) return;
+          startedWorker = true;
+          setProgress(`Loading ${file.name} into the encoder…`, 0.001);
+          worker.postMessage({ file, targetPoints: TARGET_POINTS });
+        } else if (event.data.type === "progress") {
           setProgress(event.data.stage, event.data.fraction);
         } else if (event.data.type === "result") {
-          resolve(event.data.payload);
+          finish(resolve, event.data.payload);
         } else if (event.data.type === "error") {
-          reject(new Error(event.data.message));
+          finish(reject, new Error(event.data.message));
         }
       };
       worker.onerror = (event) => {
-        reject(new Error(event.message || "CPOS encoder worker failed"));
+        finish(
+          reject,
+          new Error(event.message || "CPOS encoder worker failed to load"),
+        );
       };
-      worker.postMessage({ buffer, targetPoints: TARGET_POINTS }, [buffer]);
+      worker.onmessageerror = () => {
+        finish(
+          reject,
+          new Error("The browser could not send the POS file to the encoder"),
+        );
+      };
     });
     const header = inspectCpos(payload);
     setDownload(payload, file.name);
@@ -225,7 +226,6 @@ async function processCpos(file) {
 
 function processFile(file) {
   if (busy) return;
-  userHasActed = true;
   if (/\.pos$/i.test(file.name)) {
     encodePosFile(file);
   } else if (/\.cpos$/i.test(file.name)) {
@@ -270,4 +270,3 @@ elements.dropZone.addEventListener("drop", (event) => {
 });
 
 window.addEventListener("beforeunload", clearDownload);
-loadExample();

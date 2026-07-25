@@ -65,9 +65,10 @@ test("frontend routes POS files through the encoder worker and exposes download"
   assert.match(html, /id="progress"/);
   assert.match(app, /new Worker\(/);
   assert.match(app, /encoder\.worker\.js/);
-  assert.match(app, /worker\.postMessage\(\{ buffer, targetPoints/);
+  assert.match(app, /worker\.postMessage\(\{ file, targetPoints/);
   assert.match(app, /if \(\/\\\.pos\$\/i\.test\(file\.name\)\)/);
   assert.match(app, /anchor\.download = downloadName/);
+  assert.doesNotMatch(app, /loadExample/);
 });
 
 test("encoder worker returns a valid transferable CPOS payload", async () => {
@@ -78,9 +79,21 @@ test("encoder worker returns a valid transferable CPOS payload", async () => {
   };
   await import(`../demo/encoder.worker.js?test=${Date.now()}`);
   const source = fixturePos(2_000);
+  const file = {
+    name: "fixture.pos",
+    size: source.byteLength,
+    arrayBuffer: async () => source,
+  };
   await self.onmessage({
-    data: { buffer: source, targetPoints: 499 },
+    data: { file, targetPoints: 499 },
   });
+  assert.ok(messages.some(({ message }) => message.type === "ready"));
+  assert.ok(messages.some(
+    ({ message }) => (
+      message.type === "progress"
+      && /Loading fixture\.pos into the encoder/.test(message.stage)
+    ),
+  ));
   const result = messages.find(({ message }) => message.type === "result");
   assert.ok(result);
   assert.equal(result.transfer.length, 1);
